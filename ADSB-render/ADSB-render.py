@@ -35,30 +35,52 @@ def plotADSB(filename):
 
     signal = []
     signal_bin = ""
+    signal_bin1 = ""
+    mark = 0
+    flag = False
+
     for i in range(len(m)):
  
         if m[i] == 2139029504:
-            signal.append(1)
-        elif m[i] == 32639:
             signal.append(0)
+        elif m[i] == 32639:
+            signal.append(1)
         else:
-            signal.append(-1)
+            signal.append(0)
         
         if len(signal_bin) <= 116:
             if m[i] == 2139029504:
-                signal_bin += "1"
-            elif m[i] == 32639:
                 signal_bin += "0"
+            elif m[i] == 32639:
+                signal_bin += "1"
+            if len(signal_bin) == 116:
+                mark = i
+                flag = True
+
+        if len(signal_bin1) <= 116 and i > mark and flag:
+            if m[i] == 2139029504:
+                signal_bin1 += "0"
+            elif m[i] == 32639:
+                signal_bin1 += "1"
 
     log.success("Extracted Signal -> "+signal_bin)
     log.info("Preamble => "+signal_bin[0:4])
     log.info("DF => "+signal_bin[4:9])
     log.info("CA => "+signal_bin[9:12])
-    log.info("ICAO => "+signal_bin[12:36])
+    log.info("ICAO => "+signal_bin[12:36]+" "+"\033[91m("+str(hex(int(signal_bin[12:36], 2)))+")\033[0m")
     log.info("TYPE => "+signal_bin[36:41])
     log.info("DATA => "+signal_bin[41:92])
     log.info("Interrogator ID => "+signal_bin[92:116]+"\n")
 
+    log.success("Extracted Signal -> "+signal_bin1)
+    log.info("Preamble => "+signal_bin1[0:4])
+    log.info("DF => "+signal_bin1[4:9])
+    log.info("CA => "+signal_bin1[9:12])
+    log.info("ICAO => "+signal_bin1[12:36]+" "+"\033[91m("+str(hex(int(signal_bin1[12:36], 2)))+")\033[0m")
+    log.info("TYPE => "+signal_bin1[36:41])
+    log.info("DATA => "+signal_bin1[41:92])
+    log.info("Interrogator ID => "+signal_bin1[92:116]+"\n")
+    
     plt.ylim([-2, 2])
     plt.xlim([0,len(signal)])
     plt.plot(range(len(signal)), signal)
