@@ -31,8 +31,15 @@ optional arguments:
 An example of it's usage is as follows. This example is created using the testing files located under the ```test/``` directory
 
 ```
-$ ./ADSB-view.py --file test/Samples.iq8s 
-[I] Rendering [=========================>] 100 %
+$ ./ADSB-render.py --file test/Samples.iq8s 
+[I] Extracting [=========================>] 100 %
+[I] INFO: Preamble => 0011
+[I] INFO: DF => 01110
+[I] INFO: CA => 010
+[I] INFO: ICAO => 010101000011001000010000
+[I] INFO: TYPE => 10100
+[I] INFO: DATA =>111000001101000111111000101111110011011010001000111
+[I] INFO: Interrogator ID => 100111110000100001100110
 
 [+] SUCCESS: Plot Created
 

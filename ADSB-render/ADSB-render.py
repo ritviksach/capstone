@@ -32,8 +32,36 @@ def plotADSB(filename):
 
     print "\n"
      
-    plt.xlim([0,len(m)])
-    plt.plot(range(len(m)), m)
+
+    signal = []
+    signal_bin = ""
+    for i in range(len(m)):
+ 
+        if m[i] == 2139029504:
+            signal.append(1)
+        elif m[i] == 32639:
+            signal.append(0)
+        else:
+            signal.append(-1)
+        
+        if len(signal_bin) <= 116:
+            if m[i] == 2139029504:
+                signal_bin += "1"
+            elif m[i] == 32639:
+                signal_bin += "0"
+
+    log.success("Extracted Signal -> "+signal_bin)
+    log.info("Preamble => "+signal_bin[0:4])
+    log.info("DF => "+signal_bin[4:9])
+    log.info("CA => "+signal_bin[9:12])
+    log.info("ICAO => "+signal_bin[12:36])
+    log.info("TYPE => "+signal_bin[36:41])
+    log.info("DATA => "+signal_bin[41:92])
+    log.info("Interrogator ID => "+signal_bin[92:116]+"\n")
+
+    plt.ylim([-2, 2])
+    plt.xlim([0,len(signal)])
+    plt.plot(range(len(signal)), signal)
     
     log.success("Plot Created")
     plt.show()
