@@ -236,6 +236,24 @@ class XInputJoystick(event.EventDispatcher):
         self.dispatch_axis_events(state)
         self.dispatch_button_events(state)
 
+    def get_translated_state(self):
+        out = {}
+        
+        # Process axises
+        state = self.get_state()
+        axis_fields = dict(XINPUT_GAMEPAD._fields_)
+        for axis, type in list(axis_fields.items()):
+            if axis not in ["l_thumb_x", "l_thumb_y", "r_thumb_x", "r_thumb_y"]:
+                continue
+            val = getattr(state.gamepad, axis)
+            data_size = ctypes.sizeof(type)
+            new_val = self.translate(val, data_size)
+            if new_val < 0.08000000000000000 and new_val > -0.08000000000000000:
+                new_val = 0
+            out[axis] = new_val
+        
+        return out
+        
     def dispatch_axis_events(self, state):
         # axis fields are everything but the buttons
         axis_fields = dict(XINPUT_GAMEPAD._fields_)
@@ -251,9 +269,11 @@ class XInputJoystick(event.EventDispatcher):
             # done by feel rather than following http://msdn.microsoft.com/en-gb/library/windows/desktop/ee417001%28v=vs.85%29.aspx#dead_zone
             # ags, 2014-07-01
             if ((old_val != new_val and (new_val > 0.08000000000000000 or new_val < -0.08000000000000000) and abs(old_val - new_val) > 0.00000000500000000) or
-               (axis == 'right_trigger' or axis == 'left_trigger') and new_val == 0 and abs(old_val - new_val) > 0.00000000500000000):
+               ((axis == 'right_trigger' or axis == 'left_trigger') and new_val == 0 and abs(old_val - new_val) > 0.00000000500000000) or
+               ((axis == 'l_thumb_x' or axis == 'l_thumb_y') and new_val == 0 and abs(old_val - new_val) > 0.00000000500000000)):
                 self.dispatch_event('on_axis', axis, new_val)
-
+                
+                    
     def dispatch_button_events(self, state):
         changed = state.gamepad.buttons ^ self._last_state.gamepad.buttons
         changed = get_bit_values(changed, 16)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-
+from __future__ import division
 import threading
 import sys
 import time
@@ -71,8 +71,8 @@ class CommandThread(threading.Thread):
     def setControlValues(self, throttle=0.0, rotation=0.0, elev=0.0, aile=0.0):
         self.throttle   = (int((1 - throttle) * ((0x05dc-0x02bf)>>1)) + 0x02bf)
         self.rotation   = (int((1 - rotation) * ((0x0640-0x025b)>>1)) + 0x025b)
-        self.elev       = (int((1 - elev  )   * ((0x0640-0x025b)>>1)) + 0x025b)
-        self.aile       = (int((1 - aile   )  * ((0x0640-0x025b)>>1)) + 0x025b)
+        self.elev       = (int((1 - elev)   * ((0x0640-0x025b)>>1)) + 0x025b)
+        self.aile       = (int((1 - aile)  * ((0x0640-0x025b)>>1)) + 0x025b)
         
     def run(self):
         self.baseValues()
@@ -90,7 +90,7 @@ class CommandThread(threading.Thread):
         
         self.baseValues()
         self.s.send(self.data)
-        time.sleep(0.01)
+        time.sleep(0.03)
         self.s.close()
         
     def shutdown(self):

@@ -1,12 +1,34 @@
+from __future__ import division
+from __future__ import print_function
 from Tkinter import *
+from PIL import Image, ImageTk
 import tkMessageBox
-from inputs import devices
+import multiprocessing
+import Queue
+import datetime
+import cv2
+import imutils
+import os
+from xinput import XInputJoystick
+from drone_command import CommandThread
+from drone_video   import VideoThread
+from drone_flight_presets import FlightModePresets as FMP
+from gps import GPS
+import threading
 
-class ControllerGUI:
+
+class ControllerGUI(threading.Thread):
     def __init__(self, master):
+        threading.Thread.__init__(self)
         self.master = master
         master.title("Controller for Walkera drones")
-        self.setWindowSize(350, 400)
+        self.setWindowSize(350, 600)
+        
+        self.GPS = GPS(0, 0, 1) # lat, lng, caution distance in metres
+        self.flightModePresets = FMP()
+        self.commander = None
+        self.video = None
+        self.flightMode = None
         
         self.throttleVal = IntVar()
         self.rotationVal = IntVar()
@@ -19,7 +41,6 @@ class ControllerGUI:
         main_panel = PanedWindow(self.master)
         main_panel.pack(fill=BOTH, expand=1)
 
-        
         statusStrLabel = Label(main_panel, textvariable= self.statusVar)
         statusStrLabel.pack()
         
@@ -36,24 +57,40 @@ class ControllerGUI:
         
         presetFrame = Frame(main_panel)
         presetFrame.pack()
+                
+        self.videoImage = Label(presetFrame, width=352, height=288)
+        self.videoImage.pack(side=BOTTOM, padx=10, pady=10)
         
-        self.startHoverButton = Button(presetFrame, text="Start Hovering", command=self.hoverDrone, fg="blue", state=DISABLED)
-        self.startHoverButton.pack(side=LEFT)
-        self.stopHoverButton = Button(presetFrame, text="Stop Hovering", command=self.hoverDrone, fg="blue", state=DISABLED)
-        self.stopHoverButton.pack(side=LEFT)
+    def createThreads(self):
+        self.video = VideoThread(self.videoImage)
+        self.commander = CommandThread()
         
+    def destroyThreads(self):
+        self.video = None
+        self.commander = None
         
     def connectDrone(self):
+        self.createThreads()
+        
         self.statusVar.set("STATUS: Connected")
         self.connectButton['state'] = DISABLED
         self.disconnectButton['state'] = ACTIVE
-        self.startHoverButton['state'], self.stopHoverButton['state'] = ACTIVE, ACTIVE
+        
+        self.video.start()
+        self.commander.start()
         
     def disconnectDrone(self):
+        if self.video is not None:
+            self.video.shutdown()
+        
+        if self.commander is not None:
+            self.commander.shutdown()
+        
         self.statusVar.set("STATUS: Disconnected")
         self.disconnectButton['state'] = DISABLED
         self.connectButton['state'] = ACTIVE
-        self.startHoverButton['state'], self.stopHoverButton['state'] = DISABLED, DISABLED
+        
+        self.destroyThreads()
         
     def hoverDrone(self):
         self.statusVar.set("Status: Hovering, connected")
@@ -63,11 +100,11 @@ class ControllerGUI:
 
 
     def addScales(self, parent):
-        throttle_scale = self.addScale(parent, "Throttle", self.throttleVal, HORIZONTAL, 700, 1500)
-        rotation_scale = self.addScale(parent, "Rotation", self.rotationVal, HORIZONTAL, 600, 1600)
+        self.throttle_scale = self.addScale(parent, "Throttle", self.throttleVal, HORIZONTAL, 700, 1500)
+        self.rotation_scale = self.addScale(parent, "Rotation", self.rotationVal, HORIZONTAL, 600, 1600)
 
-        elev_scale = self.addScale(parent, "Elevation", self.elevVal, HORIZONTAL, 600, 1600)
-        aile_scale = self.addScale(parent, "Aile", self.aileVal, HORIZONTAL, 600, 1600)
+        self.elev_scale = self.addScale(parent, "Elevation", self.elevVal, HORIZONTAL, 600, 1600)
+        self.aile_scale = self.addScale(parent, "Aile", self.aileVal, HORIZONTAL, 600, 1600)
         
     
     def addScale(self, parent, scale_label, scale_variable, orientation, range_from, range_to):
@@ -81,3 +118,103 @@ class ControllerGUI:
         newScale.pack(anchor=CENTER)
 
         return newScale
+    
+    def listenController(self, root, joystick):
+        joystick.dispatch_events() # for buttons
+        current_state = joystick.get_translated_state()
+        
+        # If any flight mode is activated
+        # Apply preset values over current values
+        if self.flightMode is not None:
+            current_state = self.applyFlightMode(self.flightMode, current_state)
+        
+        # Get all nearby valid ADS-B messages/locations
+        '''
+            COLLISION AVOIDANCE SYSTEM
+        
+        objectLocations = some-function-in-adsb-api # Returns a list of tuples of lat lng [(lat1, lng1), (lat2, lng2)...]
+        for objectLocation in objectLocations:
+            lat, lng = objectLocation
+            if self.GPS.alert(lat, lng):
+                print "*** Collision detection activated, taking over controls! ***"
+                sys.stdout.flush()
+                current_state = self.applyFlightMode("evasiveManeuver", current_state)
+        '''
+        
+        self.updateScales(current_state) # Updates GUI
+        # Send updated values to drone!
+        if self.commander is not None:
+            self.updateDrone(current_state)
+            
+        # Target FPS for input = 40, 1000 / 40 == 25
+        root.after(25, self.listenController, root, joystick)
+        
+    def updateDrone(self, current_state):
+        scaledThrottle, scaledRotation, scaledElev, scaledAile = self.scaleValues(current_state)
+
+        throttle = self.scale(current_state["r_thumb_y"], [-0.50, 0.50], [-1, 1])
+        # Throttle is reversed i.e. pulling it down should be the lowest value
+        throttle = 0 - throttle
+        self.commander.setControlValues(
+            throttle,
+            self.scale(current_state["r_thumb_x"], [-0.50, 0.50], [-1, 1]),
+            self.scale(current_state["l_thumb_y"], [-0.50, 0.50], [-1, 1]),
+            self.scale(current_state["l_thumb_x"], [-0.50, 0.50], [-1, 1])
+        )
+    
+    def applyFlightMode(self, flightMode, current_state):
+        throttle, rotation, elev, aile = self.flightModePresets.getValues(flightMode)
+            if throttle is not None:
+                current_state["r_thumb_y"] = self.scale(throttle, [700, 1500], [-0.50, 0.50])
+            if rotation is not None:
+                current_state["r_thumb_x"] = self.scale(rotation, [600, 1600], [-0.50, 0.50])
+            if elev is not None:
+                current_state["l_thumb_y"] = self.scale(elev, [600, 1600], [-0.50, 0.50])
+            if aile is not None:
+                current_state["l_thumb_x"] = self.scale(aile, [600, 1600], [-0.50, 0.50])
+                
+        return current_state
+    
+    def updateScales(self, state):
+        scaledThrottle, scaledRotation, scaledElev, scaledAile = self.scaleValues(state)
+        
+        self.throttle_scale.set(scaledThrottle)
+        self.rotation_scale.set(scaledRotation)
+        self.elev_scale.set(scaledElev)
+        self.aile_scale.set(scaledAile)
+        
+    def scaleValues(self, state):
+        throttle, rotation, elev, aile = state["r_thumb_y"], state["r_thumb_x"], state["l_thumb_y"], state["l_thumb_x"] 
+        if throttle == 1:
+            throttle = 0
+        if rotation == 1:
+            rotation = 0
+        if elev == 1:
+            elev = 0
+        if aile == 1:
+            aile = 0
+            
+        scaledThrottle = self.scale(throttle, [-0.50, 0.50], [700, 1500])
+        scaledRotation = self.scale(rotation, [-0.50, 0.50], [600, 1600])
+        scaledElev = self.scale(elev, [-0.50, 0.50], [600, 1600])
+        scaledAile = self.scale(aile, [-0.50, 0.50], [600, 1600])
+        
+        return scaledThrottle, scaledRotation, scaledElev, scaledAile
+    
+    def scale(self, val, src, dst):
+        """
+        Scale the given value from the scale of src to the scale of dst.
+        """
+        return ((val - src[0]) / (src[1]-src[0])) * (dst[1]-dst[0]) + dst[0]
+    
+    def toggleFlightMode(self, mode):
+        # Reset cycle values if applying any preset!
+        self.flightModePresets.reset()
+        
+        if mode == self.flightMode:
+            self.flightMode = None
+            self.statusVar.set("STATUS: CONNECTED")
+        else:
+            self.statusVar.set("STATUS: " + mode + " mode")
+            self.flightMode = mode
+    
