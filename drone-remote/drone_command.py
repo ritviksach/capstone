@@ -26,7 +26,7 @@ class CommandThread(threading.Thread):
             if ("%s"%e).find("timed out") == 0:
                 print "[Socket Connection Timeout] (Re)Connect to Walkera WiFi network..."
             else:
-                print e
+                print e, "Command Thread"
             sys.stdout.flush()
             self.s = None
             return

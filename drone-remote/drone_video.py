@@ -72,15 +72,19 @@ class VideoThread(threading.Thread):
                         img = Image.fromarray(vis)
                         img = ImageTk.PhotoImage(img)
                     except Exception, e:
-                        print Exception, e
+                        print Exception, e, "video issue"
                         sys.stdout.flush()
+                        continue
                         
                     tstamp = datetime.datetime.now()
+                    backup = self.video.image
                     try:
                         self.video.image = img
                         self.video.configure(image=img)
                     except Exception, e:
-                        print Exception, e
+                        print Exception, e, "video issue 2"
+                        self.video.image = backup
+                        self.video.configure(image=backup)
                         continue
                         
     def isAwake(self):

@@ -7,7 +7,8 @@ import time
 import sys
 
 root = Tk()
-controllerGUI = ControllerGUI(root)
+interface = "Wi-Fi 2"
+controllerGUI = ControllerGUI(root, interface)
 
 joystick = XInputJoystick(0)
 

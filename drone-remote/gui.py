@@ -1,5 +1,4 @@
 from __future__ import division
-from __future__ import print_function
 from Tkinter import *
 from PIL import Image, ImageTk
 import tkMessageBox
@@ -14,21 +13,26 @@ from drone_command import CommandThread
 from drone_video   import VideoThread
 from drone_flight_presets import FlightModePresets as FMP
 from gps import GPS
+from ADSB.ADSB_lib import ADSB_SDR_Thread, ADSB_MSG
 import threading
 
 
 class ControllerGUI(threading.Thread):
-    def __init__(self, master):
+    def __init__(self, master, interface):
         threading.Thread.__init__(self)
         self.master = master
         master.title("Controller for Walkera drones")
         self.setWindowSize(350, 600)
         
         self.GPS = GPS(0, 0, 1) # lat, lng, caution distance in metres
+        self.SDR_RECV = ADSB_SDR_Thread("recv", interface)
+        self.SDR_SEND = ADSB_SDR_Thread("send", interface)
         self.flightModePresets = FMP()
         self.commander = None
         self.video = None
         self.flightMode = None
+        
+        self.evadingObject = None # Signifies whether performing evasive movements or not
         
         self.throttleVal = IntVar()
         self.rotationVal = IntVar()
@@ -131,15 +135,25 @@ class ControllerGUI(threading.Thread):
         # Get all nearby valid ADS-B messages/locations
         '''
             COLLISION AVOIDANCE SYSTEM
-        
-        objectLocations = some-function-in-adsb-api # Returns a list of tuples of lat lng [(lat1, lng1), (lat2, lng2)...]
+        '''
+        objectLocations = self.SDR_RECV.getPositionStream() # Returns a list of tuples of lat lng altitude timestamp [(lat1, lng1..), (lat2, lng2..)...]
         for objectLocation in objectLocations:
-            lat, lng = objectLocation
-            if self.GPS.alert(lat, lng):
+            lat, lng, icao, altitude, timestamp = objectLocation
+            
+            isAlert = self.GPS.alert(lat, lng)
+            
+            if isAlert and not self.evadingObject:
+                self.flightModePresets.reset()
                 print "*** Collision detection activated, taking over controls! ***"
                 sys.stdout.flush()
-                current_state = self.applyFlightMode("evasiveManeuver", current_state)
-        '''
+                self.evadingObject = icao
+                current_state = self.applyFlightMode("evasiveManeuver", current_state, None)
+            elif isAlert and self.evadingObject == icao:
+                current_state = self.applyFlightMode("evasiveManeuver", current_state, None) # Stay in evasive mode
+            elif self.evadingObject == icao and not isAlert:
+                print "*** Collision avoided! Slowly giving control back ***"
+                current_state = self.applyFlightMode("evasiveManeuver", current_state, "stop", self.resetEvading)
+            
         
         self.updateScales(current_state) # Updates GUI
         # Send updated values to drone!
@@ -164,15 +178,15 @@ class ControllerGUI(threading.Thread):
     
     def applyFlightMode(self, flightMode, current_state):
         throttle, rotation, elev, aile = self.flightModePresets.getValues(flightMode)
-            if throttle is not None:
-                current_state["r_thumb_y"] = self.scale(throttle, [700, 1500], [-0.50, 0.50])
-            if rotation is not None:
-                current_state["r_thumb_x"] = self.scale(rotation, [600, 1600], [-0.50, 0.50])
-            if elev is not None:
-                current_state["l_thumb_y"] = self.scale(elev, [600, 1600], [-0.50, 0.50])
-            if aile is not None:
-                current_state["l_thumb_x"] = self.scale(aile, [600, 1600], [-0.50, 0.50])
-                
+        if throttle is not None:
+            current_state["r_thumb_y"] = self.scale(throttle, [700, 1500], [-0.50, 0.50])
+        if rotation is not None:
+            current_state["r_thumb_x"] = self.scale(rotation, [600, 1600], [-0.50, 0.50])
+        if elev is not None:
+            current_state["l_thumb_y"] = self.scale(elev, [600, 1600], [-0.50, 0.50])
+        if aile is not None:
+            current_state["l_thumb_x"] = self.scale(aile, [600, 1600], [-0.50, 0.50])
+
         return current_state
     
     def updateScales(self, state):
@@ -218,3 +232,5 @@ class ControllerGUI(threading.Thread):
             self.statusVar.set("STATUS: " + mode + " mode")
             self.flightMode = mode
     
+    def resetEvading(self):
+        self.evadingObject = False
